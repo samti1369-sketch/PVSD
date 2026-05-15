@@ -1,25 +1,471 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard ผู้ทรงคุณวุฒิ</title>
-<style>
-body{font-family:Arial,sans-serif;background:#f4f8fc;padding:40px}
-.card{background:#fff;border-radius:14px;padding:30px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
-h1{color:#0b3b75}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard ผู้ทรงคุณวุฒิคณะกรรมการประจำจังหวัด</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap');
+    :root{
+      --blue1:#061e4a;
+      --blue2:#0a397a;
+      --line:#dbe7f5;
+      --val:#1763d1;
+      --econ:#169b73;
+      --arch:#7b49bf;
+      --law:#f07818;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:'Sarabun',sans-serif;
+      background:linear-gradient(180deg,#edf5ff 0%,#f8fbff 55%,#eef4fb 100%);
+      color:#10234a;
+    }
+    .shell{max-width:1540px;margin:14px auto;padding:0 14px}
+    .frame{background:#fff;border:3px solid #0b2e63;border-radius:22px;overflow:hidden;box-shadow:0 22px 55px rgba(5,30,75,.18)}
+    .topbar{background:linear-gradient(135deg,var(--blue1),var(--blue2));color:#fff;padding:20px 24px}
+    .card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 24px rgba(10,45,100,.08);overflow:hidden}
+    .card-head{background:linear-gradient(135deg,#08275b,#0a397a);color:#fff;padding:12px 16px;font-weight:800;display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .card-body{padding:14px}
+    .metric{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 18px rgba(10,45,100,.08);padding:16px;display:flex;gap:14px;align-items:center;min-height:106px}
+    .metric .icon{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;color:white;font-size:28px;box-shadow:inset 0 -10px 18px rgba(0,0,0,.12)}
+    .selectbox{width:100%;border:1px solid #bfd0e5;border-radius:10px;background:#fff;padding:10px 12px;color:#10234a;outline:none;font-weight:600}
+    .selectbox:focus{border-color:#2368c8;box-shadow:0 0 0 3px rgba(35,104,200,.12)}
+    #map{height:620px;border-radius:14px;background:#e8f1fb;border:1px solid #d5e2f2;z-index:1}
+    .map-holder{position:relative}
+    .watermark{position:absolute;right:14px;bottom:12px;background:rgba(255,255,255,.9);border:1px solid #dce8f5;border-radius:10px;padding:7px 10px;font-size:12px;color:#607086;z-index:400}
+    .mini-card{border:1px solid #dbe7f5;background:#fff;border-radius:14px;padding:12px;box-shadow:0 5px 14px rgba(10,45,100,.04)}
+    .legend-dot{width:14px;height:14px;border-radius:50%;display:inline-block;margin-right:8px;vertical-align:-2px}
+    .pie-pin{
+      width:48px;height:48px;border-radius:50%;
+      border:4px solid #fff;
+      box-shadow:0 5px 12px rgba(2,20,45,.34);
+      position:relative;
+    }
+    .pie-pin:after{
+      content:"";
+      position:absolute;
+      inset:10px;
+      border-radius:50%;
+      background:rgba(255,255,255,.16);
+    }
+    .province-label{background:#071f4be8!important;color:#fff!important;border:0!important;border-radius:10px!important;padding:6px 10px!important;box-shadow:0 8px 18px rgba(0,0,0,.25)!important;font-family:'Sarabun',sans-serif!important}
+    .btn{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:#fff;border-radius:10px;padding:8px 12px;font-weight:700}
+    .pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 12px;font-weight:800;font-size:13px;white-space:nowrap}
+    .pill-green{background:#dcf8ea;color:#087a4f}
+    .pill-orange{background:#fff0d8;color:#ad5b00}
+    .category-chip{border-radius:999px;padding:5px 9px;color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;gap:5px}
+    .table-wrap{overflow:auto;border:1px solid #dae7f5;border-radius:14px}
+    table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}
+    th{background:#f4f8fd;color:#17345f;font-weight:800;border-bottom:1px solid #dbe7f5;padding:10px;text-align:center;white-space:nowrap}
+    td{border-bottom:1px solid #edf3fb;padding:10px;vertical-align:top}
+    tr:last-child td{border-bottom:none}
+    .loading{position:fixed;inset:0;background:rgba(242,247,253,.86);z-index:9999;display:grid;place-items:center;color:#0a397a;font-weight:800;font-size:20px;text-align:center}
+    .spinner{width:40px;height:40px;border:4px solid #cfe1f6;border-top-color:#0f5cc9;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:1000px){#map{height:520px}.card-body{padding:10px}.metric{min-height:auto}}
+  </style>
 </head>
+
 <body>
-<div class="card">
-<h1>Dashboard ผู้ทรงคุณวุฒิคณะกรรมการประจำจังหวัด</h1>
-<p>เวอร์ชันล่าสุด (Fixed V3)</p>
-<ul>
-<li>แก้ Pie Chart จังหวัดสาขาซ้ำให้แสดงสีเต็มวง</li>
-<li>แก้รายละเอียดรายชื่อให้แสดงถูกต้อง</li>
-<li>เปลี่ยนคอลัมน์เป็น “วันที่ครบวาระ”</li>
-<li>รองรับ Google Sheets</li>
-</ul>
-</div>
+  <div id="loading" class="loading"><div><div class="spinner"></div>กำลังโหลดข้อมูลจาก Google Sheets...</div></div>
+
+  <div class="shell">
+    <div class="frame">
+      <header class="topbar">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div class="text-center lg:text-left">
+            <h1 class="text-2xl lg:text-4xl font-extrabold tracking-tight">Dashboard ผู้ทรงคุณวุฒิคณะกรรมการประจำจังหวัด</h1>
+            <p class="text-blue-100 mt-1 text-sm lg:text-base">แผนที่ Pie Chart รายจังหวัด พร้อมรายละเอียดผู้ทรงคุณวุฒิ รายที่ 1–3 และวันที่ครบวาระ</p>
+          </div>
+          <div class="text-sm text-blue-100">📅 <span id="dataDate">ข้อมูล ณ วันนี้</span></div>
+        </div>
+      </header>
+
+      <main class="p-3 lg:p-4 space-y-3">
+        <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div class="metric"><div class="icon" style="background:linear-gradient(135deg,#1763d1,#063d91)">🏛️</div><div><p class="text-sm text-slate-500 font-semibold">จังหวัดทั้งหมด</p><div class="text-4xl font-extrabold text-blue-700" id="kpiProvince">-</div><p class="text-sm font-semibold">จังหวัด</p></div></div>
+          <div class="metric"><div class="icon" style="background:linear-gradient(135deg,#1eb386,#087354)">👥</div><div><p class="text-sm text-slate-500 font-semibold">ผู้ทรงคุณวุฒิทั้งหมด</p><div class="text-4xl font-extrabold text-emerald-700" id="kpiExpert">-</div><p class="text-sm font-semibold">ท่าน</p></div></div>
+          <div class="metric"><div class="icon" style="background:linear-gradient(135deg,#9555d6,#6532a2)">🎓</div><div><p class="text-sm text-slate-500 font-semibold">สาขาความเชี่ยวชาญ</p><div class="text-4xl font-extrabold text-purple-700">4</div><p class="text-sm font-semibold">ด้าน</p></div></div>
+          <div class="metric"><div class="icon" style="background:linear-gradient(135deg,#ff8b25,#d75d00)">🔁</div><div><p class="text-sm text-slate-500 font-semibold">จังหวัดที่มีสาขาซ้ำ</p><div class="text-4xl font-extrabold text-orange-600" id="kpiDup">-</div><p class="text-sm font-semibold"><span id="kpiDupPct">-</span></p></div></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span>ตัวกรองข้อมูล</span><button class="btn" onclick="resetFilter()">↻ ล้างการเลือก</button></div>
+          <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label><span class="text-sm font-bold text-slate-600 block mb-1">เลือกจังหวัด</span><select id="provincePicker" class="selectbox"><option value="">ทั้งหมด</option></select></label>
+            <label><span class="text-sm font-bold text-slate-600 block mb-1">เลือกสาขาความเชี่ยวชาญ</span><select id="expertisePicker" class="selectbox"><option value="">ทั้งหมด</option></select></label>
+            <label><span class="text-sm font-bold text-slate-600 block mb-1">เลือกสถานะ</span><select id="statusPicker" class="selectbox"><option value="">ทั้งหมด</option><option value="unique">ครบ 3 สาขาไม่ซ้ำ</option><option value="duplicate">มีสาขาซ้ำ</option><option value="allSame">ซ้ำสาขาเดียวกันทั้งหมด</option></select></label>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+          <div class="xl:col-span-7 card">
+            <div class="card-head"><span>แผนที่แสดง Pie Chart รายจังหวัด</span><span class="text-xs text-blue-100">คลิกหมุดหรือเลือกจาก Dropdown</span></div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+                <div class="lg:col-span-1 space-y-3 order-2 lg:order-1">
+                  <div class="mini-card">
+                    <h4 class="font-extrabold text-blue-900 mb-2">สาขาความเชี่ยวชาญ</h4>
+                    <div id="legend" class="space-y-2 text-xs leading-tight"></div>
+                  </div>
+                  <div class="mini-card text-xs text-slate-600 leading-relaxed">
+                    <b>หมายเหตุ</b><br>
+                    หากจังหวัดใดมีผู้ทรงคุณวุฒิทั้ง 3 รายอยู่ในสาขาเดียวกันทั้งหมด หมุด Pie จะเป็นสีเดียวเต็มวงตามสาขานั้น
+                  </div>
+                </div>
+                <div class="lg:col-span-4 map-holder order-1 lg:order-2">
+                  <div id="map"></div>
+                  <div class="watermark">Map with CSS Pie Charts</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="xl:col-span-5 card">
+            <div class="card-head"><span>รายละเอียดจังหวัดที่เลือก</span><button class="btn" onclick="focusCurrent()">⌖ ล็อกตำแหน่ง</button></div>
+            <div class="card-body space-y-3">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full bg-blue-700 text-white grid place-items-center text-2xl">📍</div>
+                <div><p class="text-sm text-slate-500 font-bold">จังหวัด</p><h2 class="text-2xl font-extrabold text-blue-800" id="displayProv">-</h2></div>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-center">
+                <div class="mini-card"><p class="text-xs text-slate-500 font-bold">ผู้ทรงคุณวุฒิ</p><p class="text-2xl font-extrabold text-blue-700"><span id="provTotal">-</span></p><p class="text-xs">ท่าน</p></div>
+                <div class="mini-card"><p class="text-xs text-slate-500 font-bold">ความหลากหลาย</p><p class="text-base font-extrabold" id="provDiversity">-</p></div>
+                <div class="mini-card"><p class="text-xs text-slate-500 font-bold">สถานะ</p><div id="provStatus" class="mt-2"></div></div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                <div class="mini-card"><canvas id="provinceChart" height="180"></canvas></div>
+                <div class="mini-card text-sm"><h4 class="font-extrabold text-blue-900 mb-2">สรุปสัดส่วนจังหวัด</h4><div id="provinceSummary" class="space-y-1 text-slate-700">เลือกจังหวัดจากแผนที่หรือ Dropdown</div></div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>เสนอพิจารณา</th><th>ชื่อ-นามสกุล</th><th>สาขาความเชี่ยวชาญ</th><th>วันที่ครบวาระ</th></tr></thead>
+                  <tbody id="detailTable"><tr><td colspan="4" class="text-center text-slate-400 py-8">เลือกจังหวัดเพื่อแสดงข้อมูล</td></tr></tbody>
+                </table>
+              </div>
+              <div id="statusIndicator" class="rounded-xl p-3 border hidden"></div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+          <div class="xl:col-span-4 card"><div class="card-head"><span>จำนวนผู้ทรงคุณวุฒิแยกตามสาขา</span></div><div class="card-body"><canvas id="barChart" height="210"></canvas></div></div>
+          <div class="xl:col-span-3 card"><div class="card-head"><span>สัดส่วนรวมตามสาขา</span></div><div class="card-body"><canvas id="donutChart" height="235"></canvas></div></div>
+          <div class="xl:col-span-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="card"><div class="card-head"><span>จังหวัดที่มีผู้เชี่ยวชาญสาขาซ้ำ</span></div><div class="card-body"><div class="table-wrap max-h-[280px]"><table><thead><tr><th>ลำดับ</th><th>จังหวัด</th><th>รูปแบบ</th></tr></thead><tbody id="dupTable"></tbody></table></div></div></div>
+            <div class="card"><div class="card-head"><span>จังหวัดที่ครบ 3 สาขาไม่ซ้ำ</span></div><div class="card-body"><div class="table-wrap max-h-[280px]"><table><thead><tr><th>ลำดับ</th><th>จังหวัด</th><th>จำนวน</th></tr></thead><tbody id="uniqueTable"></tbody></table></div></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+<script>
+const SHEET_ID = '1zXN7C0iznjj4cGLfICDreSCXl5zcC54Ij6la1ATiV_g';
+const SHEET_GID = '0';
+const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_GID}`;
+const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
+
+const CATS = [
+  {key:'valuation', label:'ด้านการประเมินราคาทรัพย์สิน หรือด้านการพัฒนาอสังหาริมทรัพย์', short:'ประเมินราคา/อสังหาฯ', color:'#1763d1'},
+  {key:'econ', label:'ด้านเศรษฐศาสตร์ หรือด้านบริหาร', short:'เศรษฐศาสตร์/บริหาร', color:'#169b73'},
+  {key:'arch', label:'ด้านสถาปัตยกรรม หรือด้านวิศวกรรมโยธา', short:'สถาปัตย์/วิศวโยธา', color:'#7b49bf'},
+  {key:'law', label:'ด้านกฎหมาย หรือด้านรัฐศาสตร์', short:'กฎหมาย/รัฐศาสตร์', color:'#f07818'}
+];
+const colors = CATS.map(c=>c.color);
+
+const provinceCoords = {
+'กรุงเทพมหานคร':[13.7563,100.5018],'กระบี่':[8.0863,98.9063],'กาญจนบุรี':[14.0228,99.5328],'กาฬสินธุ์':[16.4314,103.5059],'กำแพงเพชร':[16.4828,99.5227],'ขอนแก่น':[16.4419,102.8359],'จันทบุรี':[12.6113,102.1037],'ฉะเชิงเทรา':[13.6904,101.0779],'ชลบุรี':[13.3611,100.9847],'ชัยนาท':[15.1852,100.1251],'ชัยภูมิ':[15.8068,102.0315],'ชุมพร':[10.4930,99.1800],'เชียงราย':[19.9105,99.8406],'เชียงใหม่':[18.7883,98.9853],'ตรัง':[7.5594,99.6114],'ตราด':[12.2428,102.5175],'ตาก':[16.8839,99.1258],'นครนายก':[14.2069,101.2131],'นครปฐม':[13.8199,100.0622],'นครพนม':[17.3920,104.7696],'นครราชสีมา':[14.9799,102.0977],'นครศรีธรรมราช':[8.4304,99.9631],'นครสวรรค์':[15.7047,100.1372],'นนทบุรี':[13.8621,100.5144],'นราธิวาส':[6.4255,101.8253],'น่าน':[18.7756,100.7730],'บึงกาฬ':[18.3609,103.6464],'บุรีรัมย์':[14.9930,103.1029],'ปทุมธานี':[14.0208,100.5250],'ประจวบคีรีขันธ์':[11.8124,99.7973],'ปราจีนบุรี':[14.0509,101.3723],'ปัตตานี':[6.8695,101.2505],'พระนครศรีอยุธยา':[14.3532,100.5689],'พะเยา':[19.1665,99.9019],'พังงา':[8.4501,98.5255],'พัทลุง':[7.6167,100.0740],'พิจิตร':[16.4429,100.3488],'พิษณุโลก':[16.8211,100.2659],'เพชรบุรี':[13.1112,99.9398],'เพชรบูรณ์':[16.4189,101.1551],'แพร่':[18.1446,100.1403],'ภูเก็ต':[7.8804,98.3923],'มหาสารคาม':[16.1851,103.3026],'มุกดาหาร':[16.5424,104.7209],'แม่ฮ่องสอน':[19.3020,97.9654],'ยโสธร':[15.7926,104.1453],'ยะลา':[6.5411,101.2804],'ร้อยเอ็ด':[16.0538,103.6520],'ระนอง':[9.9529,98.6085],'ระยอง':[12.6814,101.2816],'ราชบุรี':[13.5283,99.8134],'ลพบุรี':[14.7995,100.6534],'ลำปาง':[18.2888,99.4909],'ลำพูน':[18.5745,99.0087],'เลย':[17.4860,101.7223],'ศรีสะเกษ':[15.1186,104.3220],'สกลนคร':[17.1546,104.1348],'สงขลา':[7.1898,100.5951],'สตูล':[6.6238,100.0674],'สมุทรปราการ':[13.5991,100.5998],'สมุทรสงคราม':[13.4098,100.0023],'สมุทรสาคร':[13.5475,100.2744],'สระแก้ว':[13.8240,102.0646],'สระบุรี':[14.5289,100.9101],'สิงห์บุรี':[14.8936,100.3967],'สุโขทัย':[17.0056,99.8264],'สุพรรณบุรี':[14.4745,100.1177],'สุราษฎร์ธานี':[9.1382,99.3215],'สุรินทร์':[14.8829,103.4937],'หนองคาย':[17.8783,102.7413],'หนองบัวลำภู':[17.2218,102.4260],'อ่างทอง':[14.5896,100.4551],'อำนาจเจริญ':[15.8657,104.6258],'อุดรธานี':[17.4138,102.7872],'อุตรดิตถ์':[17.6201,100.0993],'อุทัยธานี':[15.3835,100.0246],'อุบลราชธานี':[15.2448,104.8473]
+};
+
+let rawData=[], grouped={}, map, markers={}, activeProvince='', provinceChart, barChart, donutChart, currentFiltered=[];
+
+function t(v){return String(v ?? '').replace(/\uFEFF/g,'').replace(/\s+/g,' ').trim();}
+function compact(v){return t(v).replace(/\s+/g,'').replace(/[()（）\/\-_:：]/g,'').toLowerCase();}
+function pick(row, patterns){
+  const keys=Object.keys(row);
+  for(const p of patterns){
+    const pp=compact(p);
+    const found=keys.find(k=>compact(k)===pp) || keys.find(k=>compact(k).includes(pp));
+    if(found && t(row[found])) return row[found];
+  }
+  return '';
+}
+function findWideKey(keys, no, tokens, excludeTokens=[]){
+  const n = String(no);
+  const cand = keys.filter(k=>{
+    const ck=compact(k);
+    const hasNo = ck.includes(`รายที่${n}`) || ck.includes(`ราย${n}`) || ck.includes(`คนที่${n}`) || ck.endsWith(n);
+    const hasToken = tokens.some(x=>ck.includes(compact(x)));
+    const excluded = excludeTokens.some(x=>ck.includes(compact(x)));
+    return hasNo && hasToken && !excluded;
+  });
+  return cand[0] || '';
+}
+function catOf(text){
+  const x=t(text);
+  if(x.includes('ประเมิน') || x.includes('อสังหา') || x.includes('พัฒนาอสัง')) return 'valuation';
+  if(x.includes('เศรษฐ') || x.includes('บริหาร')) return 'econ';
+  if(x.includes('สถาปัต') || x.includes('วิศว')) return 'arch';
+  if(x.includes('กฎหมาย') || x.includes('รัฐศาสตร์')) return 'law';
+  return 'other';
+}
+function catMeta(key){return CATS.find(c=>c.key===key) || {key:'other',label:'อื่น ๆ',short:'อื่น ๆ',color:'#7f8da0'};}
+
+function parseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i], next=text[i+1];
+    if(ch === '"' && q && next === '"'){cell+='"'; i++;}
+    else if(ch === '"'){q=!q;}
+    else if(ch === ',' && !q){row.push(cell); cell='';}
+    else if((ch === '\n' || ch === '\r') && !q){
+      if(ch === '\r' && next === '\n') i++;
+      row.push(cell);
+      if(row.some(v=>t(v))) rows.push(row);
+      row=[]; cell='';
+    } else cell+=ch;
+  }
+  row.push(cell); if(row.some(v=>t(v))) rows.push(row);
+  const head=(rows.shift()||[]).map(t);
+  return rows.map(r=>{const o={}; head.forEach((h,i)=>o[h]=r[i]||''); return o;});
+}
+function parseGViz(jsonText){
+  const json=JSON.parse(jsonText.substring(jsonText.indexOf('{'), jsonText.lastIndexOf('}')+1));
+  const cols=json.table.cols.map((c,i)=>t(c.label||`COL${i}`));
+  return json.table.rows.map(r=>{const o={}; (r.c||[]).forEach((cell,i)=>o[cols[i]]=cell?.f ?? cell?.v ?? ''); return o;}).filter(r=>Object.values(r).some(v=>t(v)));
+}
+
+/* รองรับ 2 โครงสร้าง:
+   1) long format: 1 แถว = ผู้ทรงคุณวุฒิ 1 ราย
+   2) wide format: 1 แถว = 1 จังหวัด และมีคอลัมน์ รายที่ 1, รายที่ 2, รายที่ 3
+*/
+function normalizeRows(rows){
+  const out=[];
+  rows.forEach(r=>{
+    const province=t(pick(r,['จังหวัด','ชื่อจังหวัด','Province','province']));
+    if(!province || province==='จังหวัด') return;
+    const keys=Object.keys(r);
+
+    let madeWide=false;
+    for(let i=1;i<=3;i++){
+      const nameKey=findWideKey(keys,i,['ชื่อ','นามสกุล','ผู้ทรงคุณวุฒิ'],['สาขา','เชี่ยวชาญ','ด้าน','วาระ','วันที่']);
+      const expertKey=findWideKey(keys,i,['สาขา','เชี่ยวชาญ','ด้าน'],['ชื่อ','นามสกุล','วาระ','วันที่']);
+      const endKey=findWideKey(keys,i,['ครบวาระ','วาระ','วันที่','สิ้นสุด'],['ชื่อ','สาขา','เชี่ยวชาญ']);
+
+      const name=t(nameKey ? r[nameKey] : '');
+      const expertise=t(expertKey ? r[expertKey] : '');
+      const endDate=t(endKey ? r[endKey] : '');
+
+      if(name || expertise || endDate){
+        madeWide=true;
+        out.push({province, order:`รายที่ ${i}`, name:name || '-', expertise:expertise || '-', endDate:endDate || '-', cat:catOf(expertise)});
+      }
+    }
+
+    if(!madeWide){
+      const order=t(pick(r,['เสนอพิจารณา','พิจารณา','รายที่','ลำดับ','ลำดับที่']));
+      const name=t(pick(r,['ชื่อ-นามสกุล','ชื่อ นามสกุล','ชื่อ','ชื่อผู้ทรงคุณวุฒิ','ผู้ทรงคุณวุฒิ','รายชื่อ']));
+      const expertise=t(pick(r,['ความเชี่ยวชาญ','สาขาความเชี่ยวชาญ','ด้านความเชี่ยวชาญ','สาขา','ด้าน']));
+      const endDate=t(pick(r,['วันที่ครบวาระ','ครบวาระ','วันครบวาระ','วันที่สิ้นสุดวาระ','สิ้นสุดวาระ','ครบกำหนดวาระ']));
+      out.push({province, order, name:name||'-', expertise:expertise||'-', endDate:endDate||'-', cat:catOf(expertise)});
+    }
+  });
+  return out.filter(r=>r.province && provinceCoords[r.province]);
+}
+
+function fallbackData(){
+  const provs=Object.keys(provinceCoords), demo=[];
+  provs.forEach((p,i)=>{
+    let cats=['econ','arch','law'];
+    if(i%3===0) cats=['econ','valuation','law'];
+    if(i%5===0) cats=['econ','econ','law'];
+    if(i%9===0) cats=['arch','arch','arch'];
+    cats.forEach((ck,j)=>demo.push({province:p,order:`รายที่ ${j+1}`,name:`ผู้ทรงคุณวุฒิ${p} รายที่ ${j+1}`,expertise:catMeta(ck).label,endDate:'-',cat:ck}));
+  });
+  return demo;
+}
+
+async function loadData(){
+  try{
+    const res=await fetch(CSV_URL,{cache:'no-store'});
+    if(!res.ok) throw new Error('CSV fetch failed');
+    const text=await res.text();
+    rawData=normalizeRows(parseCSV(text));
+    if(!rawData.length) throw new Error('CSV empty or columns not matched');
+  }catch(e1){
+    try{
+      const res=await fetch(GVIZ_URL,{cache:'no-store'});
+      if(!res.ok) throw new Error('GViz fetch failed');
+      const text=await res.text();
+      rawData=normalizeRows(parseGViz(text));
+      if(!rawData.length) throw new Error('GViz empty or columns not matched');
+    }catch(e2){
+      console.warn(e1,e2);
+      rawData=fallbackData();
+      showWarning();
+    }
+  }
+  init();
+  document.getElementById('loading').style.display='none';
+}
+function showWarning(){
+  const el=document.createElement('div');
+  el.className='mx-4 mt-3 rounded-xl border border-orange-200 bg-orange-50 text-orange-900 p-3 text-sm font-semibold';
+  el.innerHTML='⚠️ อ่านข้อมูลจาก Google Sheets ไม่สำเร็จ หรือหัวคอลัมน์ไม่ตรง จึงแสดงข้อมูลตัวอย่างชั่วคราว';
+  document.querySelector('main').prepend(el);
+}
+
+function statusOf(rows){
+  const cats=rows.map(r=>r.cat).filter(c=>c && c!=='other');
+  const unique=[...new Set(cats)];
+  return {uniqueCount:unique.length,total:rows.length,duplicate:cats.length!==unique.length,allSame:cats.length>0 && unique.length===1,unique};
+}
+function countsByCat(rows){const obj={valuation:0,econ:0,arch:0,law:0}; rows.forEach(r=>{if(obj[r.cat]!==undefined)obj[r.cat]++;}); return obj;}
+function cssPie(counts){
+  const total=Object.values(counts).reduce((a,b)=>a+b,0);
+  if(total<=0) return '#9aa7b5';
+  const pairs=CATS.map(c=>({color:c.color, v:counts[c.key]||0})).filter(x=>x.v>0);
+  if(pairs.length===1) return pairs[0].color; // สีเดียวเต็มวง
+  let start=0, parts=[];
+  pairs.forEach(p=>{
+    const deg=(p.v/total)*360;
+    parts.push(`${p.color} ${start}deg ${start+deg}deg`);
+    start+=deg;
+  });
+  return `conic-gradient(${parts.join(',')})`;
+}
+function regroup(){grouped={}; currentFiltered.forEach(r=>(grouped[r.province] ||= []).push(r));}
+
+function initMap(){
+  map=L.map('map',{zoomControl:true}).setView([13.6,101.4],6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap & CARTO',subdomains:'abcd',maxZoom:19}).addTo(map);
+}
+function updateMarkers(){
+  Object.values(markers).forEach(m=>map.removeLayer(m)); markers={};
+  Object.entries(grouped).forEach(([prov,rows])=>{
+    const coord=provinceCoords[prov]; if(!coord) return;
+    const counts=countsByCat(rows), st=statusOf(rows);
+    const bg=cssPie(counts);
+    const html=`<div class="pie-pin" style="background:${bg};"></div>`;
+    const icon=L.divIcon({html, className:'', iconSize:[48,48], iconAnchor:[24,24]});
+    const label=st.allSame ? `ซ้ำสาขาเดียวกันทั้งหมด: ${catMeta(st.unique[0]).short}` : (st.duplicate?'มีสาขาซ้ำ':'ครบ 3 สาขาไม่ซ้ำ');
+    const marker=L.marker(coord,{icon}).addTo(map).bindTooltip(`${prov}<br>${label}`,{direction:'top',className:'province-label'});
+    marker.on('click',()=>selectProvince(prov,true));
+    markers[prov]=marker;
+  });
+}
+
+function populateFilters(){
+  const provSel=document.getElementById('provincePicker'), expSel=document.getElementById('expertisePicker');
+  const provs=[...new Set(rawData.map(r=>r.province))].sort((a,b)=>a.localeCompare(b,'th'));
+  provSel.innerHTML='<option value="">ทั้งหมด</option>'+provs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  expSel.innerHTML='<option value="">ทั้งหมด</option>'+CATS.map(c=>`<option value="${c.key}">${c.short}</option>`).join('');
+  provSel.addEventListener('change',()=>{activeProvince=provSel.value; applyFilters(true); if(activeProvince) selectProvince(activeProvince,true);});
+  expSel.addEventListener('change',()=>applyFilters(false));
+  document.getElementById('statusPicker').addEventListener('change',()=>applyFilters(false));
+}
+function applyFilters(keepProvince){
+  const prov=document.getElementById('provincePicker').value, exp=document.getElementById('expertisePicker').value, status=document.getElementById('statusPicker').value;
+  const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
+  currentFiltered=rawData.filter(r=>{
+    if(prov && r.province!==prov) return false;
+    if(exp && r.cat!==exp) return false;
+    if(status){
+      const st=statusOf(byProv[r.province]||[]);
+      if(status==='unique' && st.duplicate) return false;
+      if(status==='duplicate' && !st.duplicate) return false;
+      if(status==='allSame' && !st.allSame) return false;
+    }
+    return true;
+  });
+  regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis();
+  if(!keepProvince && !prov){const first=Object.keys(grouped)[0]; if(first) selectProvince(first,false);}
+}
+function selectProvince(prov,fly){
+  activeProvince=prov;
+  document.getElementById('provincePicker').value=prov;
+  const rows=rawData.filter(r=>r.province===prov);
+  const st=statusOf(rows), counts=countsByCat(rows);
+  document.getElementById('displayProv').textContent=prov;
+  document.getElementById('provTotal').textContent=rows.length;
+  document.getElementById('provDiversity').textContent=st.allSame ? 'ซ้ำสาขาเดียวกันทั้งหมด' : (st.duplicate ? `${st.uniqueCount} สาขา (มีซ้ำ)` : `ครบ ${st.uniqueCount} สาขาไม่ซ้ำ`);
+  document.getElementById('provDiversity').className=st.duplicate?'text-base font-extrabold text-orange-600':'text-base font-extrabold text-emerald-700';
+  document.getElementById('provStatus').innerHTML=st.duplicate?'<span class="pill pill-orange">มีสาขาซ้ำ</span>':'<span class="pill pill-green">ครบถ้วน</span>';
+
+  const body=document.getElementById('detailTable');
+  body.innerHTML=rows
+    .sort((a,b)=>String(a.order).localeCompare(String(b.order),'th',{numeric:true}))
+    .map((r,i)=>`<tr>
+      <td class="text-center font-bold text-blue-800">${r.order || `รายที่ ${i+1}`}</td>
+      <td class="font-semibold">${r.name || '-'}</td>
+      <td><span class="category-chip" style="background:${catMeta(r.cat).color}">${catMeta(r.cat).short}</span><div class="mt-1 text-xs text-slate-600">${r.expertise || '-'}</div></td>
+      <td class="text-center font-semibold">${r.endDate || '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="text-center text-slate-400 py-8">ไม่พบรายชื่อของจังหวัดนี้</td></tr>';
+
+  const indicator=document.getElementById('statusIndicator');
+  indicator.classList.remove('hidden');
+  indicator.className=st.duplicate?'rounded-xl p-3 border border-orange-200 bg-orange-50 text-orange-900':'rounded-xl p-3 border border-emerald-200 bg-emerald-50 text-emerald-900';
+  indicator.innerHTML=st.allSame ? `⚠️ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิทุกคนอยู่ในสาขาเดียวกัน (${catMeta(st.unique[0]).short}) หมุด Pie จึงแสดงสีเดียวเต็มวง` : (st.duplicate ? `⚠️ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิบางรายอยู่ในสาขาซ้ำกัน` : `✅ <b>สรุป :</b> จังหวัด${prov} ไม่มีสาขาซ้ำกัน`);
+
+  document.getElementById('provinceSummary').innerHTML=CATS.map(c=>`<div class="flex justify-between gap-2"><span><span class="legend-dot" style="background:${c.color}"></span>${c.short}</span><b>${counts[c.key]||0} ท่าน</b></div>`).join('');
+  updateProvinceChart(counts,prov);
+  if(fly && provinceCoords[prov]) map.flyTo(provinceCoords[prov],8,{duration:.8});
+  if(markers[prov]) markers[prov].openTooltip();
+}
+function updateProvinceChart(counts,prov){
+  if(provinceChart) provinceChart.destroy();
+  provinceChart=new Chart(document.getElementById('provinceChart'),{
+    type:'pie',
+    data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>counts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:2}]},
+    options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}},title:{display:true,text:`สัดส่วนความเชี่ยวชาญ : ${prov}`,font:{family:'Sarabun',size:13,weight:'bold'}}},animation:{duration:250}}
+  });
+}
+function updateCharts(){
+  const allCounts=countsByCat(currentFiltered.length?currentFiltered:rawData);
+  if(barChart) barChart.destroy();
+  barChart=new Chart(document.getElementById('barChart'),{type:'bar',data:{labels:CATS.map(c=>c.short),datasets:[{label:'จำนวน (ท่าน)',data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderRadius:8}]},options:{scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{font:{family:'Sarabun',size:10}}}},plugins:{legend:{display:false}},animation:{duration:250}}});
+  if(donutChart) donutChart.destroy();
+  donutChart=new Chart(document.getElementById('donutChart'),{type:'doughnut',data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:3}]},options:{cutout:'58%',plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}}},animation:{duration:250}}});
+}
+function updateTables(){
+  const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
+  const entries=Object.entries(byProv).map(([p,rows])=>({p,rows,st:statusOf(rows)}));
+  const dup=entries.filter(e=>e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th'));
+  const uni=entries.filter(e=>!e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th'));
+  document.getElementById('dupTable').innerHTML=dup.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-orange-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td><span class="pill pill-orange">${e.st.allSame?'ซ้ำสาขาเดียวกันทั้งหมด':`${e.st.uniqueCount} สาขา / ${e.rows.length} ราย`}</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>';
+  document.getElementById('uniqueTable').innerHTML=uni.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-emerald-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td class="text-center"><span class="pill pill-green">${e.rows.length}</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>';
+}
+function updateKpis(){
+  const provCount=new Set(rawData.map(r=>r.province)).size, expertCount=rawData.length;
+  const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
+  const dupCount=Object.values(byProv).filter(rows=>statusOf(rows).duplicate).length;
+  document.getElementById('kpiProvince').textContent=provCount;
+  document.getElementById('kpiExpert').textContent=expertCount;
+  document.getElementById('kpiDup').textContent=dupCount;
+  document.getElementById('kpiDupPct').textContent=provCount?`${((dupCount/provCount)*100).toFixed(2)}%`:'-';
+}
+function drawLegend(){
+  document.getElementById('legend').innerHTML=CATS.map(c=>`<div><span class="legend-dot" style="background:${c.color}"></span><b>${c.short}</b><br><span class="ml-6 text-slate-500">${c.label}</span></div>`).join('');
+}
+function focusCurrent(){if(activeProvince && provinceCoords[activeProvince]) map.flyTo(provinceCoords[activeProvince],8,{duration:.8});}
+function resetFilter(){document.getElementById('provincePicker').value='';document.getElementById('expertisePicker').value='';document.getElementById('statusPicker').value='';activeProvince='';applyFilters(false);map.flyTo([13.6,101.4],6,{duration:.8});}
+function init(){
+  document.getElementById('dataDate').textContent='ข้อมูล ณ วันที่ '+new Date().toLocaleDateString('th-TH',{year:'numeric',month:'short',day:'numeric'});
+  drawLegend(); initMap(); populateFilters();
+  currentFiltered=[...rawData]; regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis();
+  const first=rawData.find(r=>r.province==='เชียงใหม่')?.province || rawData[0]?.province;
+  if(first) selectProvince(first,false);
+}
+loadData();
+</script>
 </body>
 </html>
