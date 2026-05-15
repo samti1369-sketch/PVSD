@@ -148,7 +148,8 @@
 <script>
 const SHEET_ID = '1zXN7C0iznjj4cGLfICDreSCXl5zcC54Ij6la1ATiV_g';
 const SHEET_GID = '0';
-const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_GID}`;
+const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
+const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_GID}`;
 
 const CATS = [
   {key:'valuation', label:'ด้านการประเมินราคาทรัพย์สิน หรือด้านการพัฒนาอสังหาริมทรัพย์', short:'ประเมินราคา/อสังหาฯ', color:'#1763d1'},
@@ -162,57 +163,151 @@ const provinceCoords = {
 };
 let rawData=[], grouped={}, map, markers={}, activeProvince='', provinceChart, barChart, donutChart, currentFiltered=[];
 
-function normalizeText(v){return String(v ?? '').replace(/\s+/g,' ').trim();}
-function pick(row, names){for(const n of names){if(row[n]!==undefined && row[n]!==null && String(row[n]).trim()!=='') return row[n];} return '';}
-function catOf(text){const t=normalizeText(text); if(t.includes('ประเมิน')||t.includes('อสังหา')) return 'valuation'; if(t.includes('เศรษฐ')||t.includes('บริหาร')) return 'econ'; if(t.includes('สถาปัต')||t.includes('วิศว')) return 'arch'; if(t.includes('กฎหมาย')||t.includes('รัฐศาสตร์')) return 'law'; return 'other';}
+function normalizeText(v){return String(v ?? '').replace(/\u00a0/g,' ').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();}
+function normKey(v){return normalizeText(v).replace(/[\s\-–—_/()]/g,'').toLowerCase();}
 function catMeta(key){return CATS.find(c=>c.key===key) || {key:'other',label:'อื่น ๆ',short:'อื่น ๆ',color:'#7f8da0'};}
-function sheetRows(jsonText){
-  const json = JSON.parse(jsonText.substring(jsonText.indexOf('{'), jsonText.lastIndexOf('}')+1));
-  const cols = json.table.cols.map((c,i)=>normalizeText(c.label||`COL${i}`));
-  return json.table.rows.map(r=>{const o={}; (r.c||[]).forEach((cell,i)=>o[cols[i]]=cell?.f ?? cell?.v ?? ''); return o;}).filter(r=>Object.values(r).some(v=>normalizeText(v))); }
-function cleanRow(r){
-  const province=normalizeText(pick(r,['จังหวัด','Province','province','จังหวด']));
-  const order=normalizeText(pick(r,['เสนอพิจารณา','พิจารณา','รายที่','ลำดับ','เสนอพิจารณา รายที่']));
-  const name=normalizeText(pick(r,['ชื่อ-นามสกุล','ชื่อ นามสกุล','ชื่อ','ชื่อผู้ทรงคุณวุฒิ','ผู้ทรงคุณวุฒิ']));
-  const expertise=normalizeText(pick(r,['ความเชี่ยวชาญ','สาขาความเชี่ยวชาญ','ด้านความเชี่ยวชาญ','สาขา']));
-  const position=normalizeText(pick(r,['หน่วยงาน / ตำแหน่ง','หน่วยงาน/ตำแหน่ง','หน่วยงาน','ตำแหน่ง','หมายเหตุ']));
-  if(!province || province==='จังหวัด') return null;
-  return {province,order: order || '', name, expertise, position, cat:catOf(expertise)};
+function catOf(text){
+  const t=normalizeText(text);
+  if(/ประเมิน|ราคา|อสังหา|ทรัพย์สิน|พัฒนาอสัง/.test(t)) return 'valuation';
+  if(/เศรษฐ|บริหาร|การเงิน|บัญชี|ธุรกิจ|จัดการ/.test(t)) return 'econ';
+  if(/สถาปัต|วิศว|โยธา|ก่อสร้าง/.test(t)) return 'arch';
+  if(/กฎหมาย|รัฐศาสตร์|นิติ|ปกครอง/.test(t)) return 'law';
+  return 'other';
+}
+function looksProvince(v){ const t=normalizeText(v).replace(/^จังหวัด/,''); return provinceCoords[t] ? t : ''; }
+function isBlankRow(row){return !row || row.every(v=>normalizeText(v)==='');}
+function csvToRows(text){
+  const rows=[]; let row=[], cur='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i], nx=text[i+1];
+    if(ch==='"') { if(q && nx==='"'){cur+='"';i++;} else q=!q; }
+    else if(ch===',' && !q){ row.push(cur); cur=''; }
+    else if((ch==='\n'||ch==='\r') && !q){ if(ch==='\r' && nx==='\n') i++; row.push(cur); if(!isBlankRow(row)) rows.push(row); row=[]; cur=''; }
+    else cur+=ch;
+  }
+  row.push(cur); if(!isBlankRow(row)) rows.push(row);
+  return rows;
+}
+function gvizToRows(text){
+  const json = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}')+1));
+  const labels = json.table.cols.map((c,i)=>normalizeText(c.label||c.id||`COL${i+1}`));
+  const data = json.table.rows.map(r=>(r.c||[]).map(cell=>cell?.f ?? cell?.v ?? ''));
+  // ใช้ labels เป็นแถวหัวตารางเฉพาะเมื่อมีคำสำคัญพอ ไม่เช่นนั้นใช้แถวข้อมูลจริงในการตรวจหา header
+  const score = labels.reduce((s,c)=>s + (/จังหวัด/.test(c)?3:0) + (/ชื่อ|นามสกุล|ผู้ทรง/.test(c)?2:0) + (/เชี่ยวชาญ|สาขา|ด้าน/.test(c)?2:0),0);
+  return score>=5 ? [labels,...data] : data;
+}
+function headerScore(row){
+  return row.reduce((s,c)=>{ c=normalizeText(c); return s + (/จังหวัด/.test(c)?4:0) + (/ชื่อ|นามสกุล|ผู้ทรง/.test(c)?3:0) + (/เชี่ยวชาญ|สาขา|ด้าน/.test(c)?3:0) + (/หน่วยงาน|ตำแหน่ง/.test(c)?1:0) + (/รายที่|เสนอ/.test(c)?1:0); },0);
+}
+function detectHeader(rows){
+  let best=0, score=-1; for(let i=0;i<Math.min(10,rows.length);i++){ const sc=headerScore(rows[i]); if(sc>score){score=sc; best=i;} }
+  if(score>=6) return {headerIndex:best, headers:rows[best].map(normalizeText), data:rows.slice(best+1)};
+  // กรณีหัวตารางหลายบรรทัด/merge: รวม 3 แถวแรกเป็นชื่อคอลัมน์
+  const use=Math.min(3, rows.length); const max=Math.max(...rows.slice(0,use).map(r=>r.length));
+  const headers=[]; for(let c=0;c<max;c++){ const parts=[]; for(let r=0;r<use;r++){ const v=normalizeText(rows[r][c]); if(v && !parts.includes(v)) parts.push(v); } headers.push(parts.join(' ')); }
+  return {headerIndex:use-1, headers, data:rows.slice(use)};
+}
+function findIdx(headers, patterns, start=0, end=headers.length){
+  for(let i=start;i<end;i++){ const h=normKey(headers[i]); if(patterns.some(p=>p.test(h))) return i; } return -1;
+}
+function firstNonEmpty(row, idxs){ for(const i of idxs){ if(i>=0 && normalizeText(row[i])) return normalizeText(row[i]); } return ''; }
+function goodName(v){ const t=normalizeText(v); return t && !looksProvince(t) && catOf(t)==='other' && !/^\d+$/.test(t) && !/^รายที่\s*\d+/.test(t) && !/จังหวัด|เสนอพิจารณา|ความเชี่ยวชาญ|สาขา/.test(t); }
+function recordsFromRows(rows){
+  const {headers,data}=detectHeader(rows);
+  const pIdx=findIdx(headers,[/จังหวัด/,/province/]);
+  const nameIdx=findIdx(headers,[/ชื่อ.*นามสกุล/,/ชื่อนามสกุล/,/ชื่อสกุล/,/ชื่อผู้ทรง/,/ผู้ทรงคุณวุฒิ/,/^ชื่อ$/]);
+  const expIdx=findIdx(headers,[/ความเชี่ยวชาญ/,/สาขาความเชี่ยวชาญ/,/สาขา/,/ด้านความ/,/ความรู้ความสามารถ/]);
+  const posIdx=findIdx(headers,[/หน่วยงาน.*ตำแหน่ง/,/หน่วยงาน/,/ตำแหน่ง/,/สังกัด/,/หมายเหตุ/]);
+  const orderIdx=findIdx(headers,[/รายที่/,/เสนอพิจารณา/]);
+  const out=[];
+  // รูปแบบ long: 1 แถว = 1 รายชื่อ
+  if(pIdx>=0 && nameIdx>=0 && expIdx>=0){
+    const perProvCount={};
+    data.forEach(row=>{
+      const province=looksProvince(row[pIdx]) || normalizeText(row[pIdx]).replace(/^จังหวัด/,''); if(!province) return;
+      const name=normalizeText(row[nameIdx]); const expertise=normalizeText(row[expIdx]);
+      if(!name && !expertise) return;
+      perProvCount[province]=(perProvCount[province]||0)+1;
+      let order=normalizeText(row[orderIdx]); if(!/^รายที่\s*\d+/.test(order)) order=`รายที่ ${perProvCount[province]}`;
+      out.push({province,order,name:name||'-',expertise:expertise||'-',position:normalizeText(row[posIdx])||'-',cat:catOf(expertise)});
+    });
+    if(out.length) return out;
+  }
+  // รูปแบบ wide / header หลายแถว: 1 แถว = 1 จังหวัด มีรายที่ 1-3 อยู่ในแถวเดียวกัน
+  data.forEach(row=>{
+    let province = pIdx>=0 ? (looksProvince(row[pIdx]) || normalizeText(row[pIdx]).replace(/^จังหวัด/,'')) : '';
+    if(!province){ for(const cell of row){ province=looksProvince(cell); if(province) break; } }
+    if(!province || !provinceCoords[province]) return;
+    let expertIdxs=[];
+    row.forEach((v,i)=>{ if(catOf(v)!=='other') expertIdxs.push(i); });
+    // ถ้าหาความเชี่ยวชาญจากค่าในเซลล์ไม่เจอ ให้ดูจากหัวคอลัมน์ที่มีคำว่าสาขา/เชี่ยวชาญ
+    if(!expertIdxs.length){ headers.forEach((h,i)=>{ if(/เชี่ยวชาญ|สาขา|ด้าน/.test(h) && normalizeText(row[i])) expertIdxs.push(i); }); }
+    expertIdxs = [...new Set(expertIdxs)].slice(0,3);
+    if(expertIdxs.length){
+      expertIdxs.forEach((ei,k)=>{
+        const expertise=normalizeText(row[ei]);
+        let name='', position='';
+        for(let j=ei-1;j>=Math.max(0,ei-5);j--){ if(goodName(row[j])){ name=normalizeText(row[j]); break; } }
+        for(let j=ei+1;j<=Math.min(row.length-1,ei+5);j++){ const v=normalizeText(row[j]); if(v && catOf(v)==='other' && !looksProvince(v) && !/^\d+$/.test(v)){ position=v; break; } }
+        out.push({province,order:`รายที่ ${k+1}`,name:name||'-',expertise:expertise||'-',position:position||'-',cat:catOf(expertise)});
+      });
+      return;
+    }
+    // fallback ตามบล็อกหลังคอลัมน์จังหวัด: ชื่อ/สาขา/หน่วยงาน ซ้ำ 3 ชุด
+    let start = pIdx>=0 ? pIdx+1 : 1; let non=row.map(normalizeText);
+    let k=1;
+    for(let i=start;i<non.length && k<=3;i++){
+      if(!non[i] || /^\d+$/.test(non[i])) continue;
+      const window=non.slice(i, Math.min(non.length,i+5));
+      const eiRel=window.findIndex(v=>catOf(v)!=='other');
+      if(eiRel>=0){
+        const ei=i+eiRel, expertise=non[ei];
+        const name=window.slice(0,eiRel).find(goodName) || '-';
+        const position=window.slice(eiRel+1).find(v=>v && goodName(v)) || '-';
+        out.push({province,order:`รายที่ ${k}`,name,expertise,position,cat:catOf(expertise)}); k++; i=ei;
+      }
+    }
+  });
+  // ถ้าได้เกิน 3 รายต่อจังหวัด ให้เก็บ 3 รายแรกตามโจทย์
+  const limited=[]; const c={};
+  out.forEach(r=>{ c[r.province]=(c[r.province]||0)+1; if(c[r.province]<=3){ r.order=`รายที่ ${c[r.province]}`; limited.push(r); } });
+  return limited;
 }
 function fallbackData(){
-  const provs = Object.keys(provinceCoords);
-  const demo=[]; provs.forEach((p,i)=>{let cats=['econ','arch','law']; if(i%3===0) cats=['econ','valuation','law']; if(i%5===0) cats=['econ','econ','law']; if(i%9===0) cats=['arch','arch','law']; cats.forEach((ck,j)=>demo.push({province:p,order:`รายที่ ${j+1}`,name:`ผู้ทรงคุณวุฒิ ${p} ท่านที่ ${j+1}`,expertise:catMeta(ck).label,position:'-',cat:ck}));}); return demo;
+  const provs = Object.keys(provinceCoords); const demo=[];
+  provs.forEach((p,i)=>{let cats=['econ','arch','law']; if(i%3===0) cats=['econ','valuation','law']; if(i%5===0) cats=['econ','econ','law']; if(i%9===0) cats=['arch','arch','law']; cats.forEach((ck,j)=>demo.push({province:p,order:`รายที่ ${j+1}`,name:`ผู้ทรงคุณวุฒิ ${p} ท่านที่ ${j+1}`,expertise:catMeta(ck).label,position:'-',cat:ck}));});
+  return demo;
 }
 async function loadData(){
-  try{ const res=await fetch(SHEET_URL,{cache:'no-store'}); if(!res.ok) throw new Error('fetch failed'); const text=await res.text(); rawData = sheetRows(text).map(cleanRow).filter(Boolean); if(!rawData.length) throw new Error('empty'); }
-  catch(e){ console.warn('ใช้ข้อมูลตัวอย่างชั่วคราว เนื่องจากอ่าน Google Sheets ไม่ได้', e); rawData=fallbackData(); showSheetWarning(); }
+  try{
+    let rows=[];
+    try{ const res=await fetch(CSV_URL,{cache:'no-store'}); if(!res.ok) throw new Error('CSV fetch failed'); rows=csvToRows(await res.text()); }
+    catch(csvErr){ const res=await fetch(GVIZ_URL,{cache:'no-store'}); if(!res.ok) throw new Error('GVIZ fetch failed'); rows=gvizToRows(await res.text()); }
+    rawData = recordsFromRows(rows).filter(r=>r.province && provinceCoords[r.province]);
+    if(!rawData.length) throw new Error('ตรวจไม่พบคอลัมน์จังหวัด/รายชื่อ/สาขาความเชี่ยวชาญ');
+  } catch(e){ console.warn(e); rawData=fallbackData(); showSheetWarning(String(e.message||e)); }
   init(); document.getElementById('loading').style.display='none';
 }
-function showSheetWarning(){
+function showSheetWarning(msg){
   const el=document.createElement('div'); el.className='mx-4 mt-3 rounded-xl border border-orange-200 bg-orange-50 text-orange-900 p-3 text-sm font-semibold';
-  el.innerHTML='⚠️ อ่านข้อมูลจาก Google Sheets ไม่สำเร็จ จึงแสดงข้อมูลตัวอย่างชั่วคราว กรุณาตั้งค่า Sheet เป็น Anyone with the link can view';
+  el.innerHTML='⚠️ อ่านข้อมูลจริงจาก Google Sheets ไม่สำเร็จหรือโครงสร้างหัวตารางไม่ชัดเจน จึงแสดงข้อมูลตัวอย่างชั่วคราว<br><span class="font-normal">รายละเอียด: '+msg+'</span>';
   document.querySelector('main').prepend(el);
 }
-function regroup(){
-  grouped={}; currentFiltered.forEach(r=>{(grouped[r.province] ||= []).push(r);});
-}
+function regroup(){ grouped={}; currentFiltered.forEach(r=>{(grouped[r.province] ||= []).push(r);}); }
 function statusOf(rows){const cats=rows.map(r=>r.cat).filter(c=>c && c!=='other'); const unique=[...new Set(cats)]; return {uniqueCount:unique.length,total:rows.length,duplicate:cats.length!==unique.length,unique};}
 function countsByCat(rows){const obj={valuation:0,econ:0,arch:0,law:0}; rows.forEach(r=>{if(obj[r.cat]!==undefined) obj[r.cat]++;}); return obj;}
-function makePieSvg(counts, size=42){
-  const vals=CATS.map(c=>counts[c.key]||0), total=vals.reduce((a,b)=>a+b,0)||1; let angle=-90, paths='';
-  vals.forEach((v,i)=>{ if(v<=0) return; const a0=angle, a1=angle+360*v/total; angle=a1; const large=(a1-a0)>180?1:0; const r=size/2-2,cx=size/2,cy=size/2; const x0=cx+r*Math.cos(Math.PI*a0/180), y0=cy+r*Math.sin(Math.PI*a0/180); const x1=cx+r*Math.cos(Math.PI*a1/180), y1=cy+r*Math.sin(Math.PI*a1/180); paths += `<path d="M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z" fill="${colors[i]}"/>`; });
-  if(paths==='') paths=`<circle cx="${size/2}" cy="${size/2}" r="${size/2-2}" fill="#9aa7b5"/>`;
-  return `<svg class="pie-marker" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${size/2-1}" fill="#fff"/>${paths}<circle cx="${size/2}" cy="${size/2}" r="${size/2-1.5}" fill="none" stroke="#fff" stroke-width="3"/><circle cx="${size/2}" cy="${size/2}" r="${size/2-8}" fill="rgba(255,255,255,.16)"/></svg>`;
+function makePieSvg(counts, size=48){
+  const vals=CATS.map(c=>counts[c.key]||0), total=vals.reduce((a,b)=>a+b,0); let angle=-90, paths='';
+  if(total>0){ vals.forEach((v,i)=>{ if(v<=0) return; const a0=angle, a1=angle+360*v/total; angle=a1; const large=(a1-a0)>180?1:0; const r=size/2-2,cx=size/2,cy=size/2; const x0=cx+r*Math.cos(Math.PI*a0/180), y0=cy+r*Math.sin(Math.PI*a0/180); const x1=cx+r*Math.cos(Math.PI*a1/180), y1=cy+r*Math.sin(Math.PI*a1/180); paths += `<path d="M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z" fill="${colors[i]}" stroke="#fff" stroke-width="1.2"/>`; }); }
+  else paths=`<circle cx="${size/2}" cy="${size/2}" r="${size/2-3}" fill="#9aa7b5"/>`;
+  return `<svg class="pie-marker" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${size/2-1}" fill="#fff"/>${paths}<circle cx="${size/2}" cy="${size/2}" r="${size/2-1.5}" fill="none" stroke="#fff" stroke-width="3"/><circle cx="${size/2}" cy="${size/2}" r="${size/2-9}" fill="rgba(255,255,255,.08)"/></svg>`;
 }
-function initMap(){
-  map=L.map('map',{zoomControl:true}).setView([13.6,101.4],6);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap & CARTO',subdomains:'abcd',maxZoom:19}).addTo(map);
-}
+function initMap(){ map=L.map('map',{zoomControl:true}).setView([13.6,101.4],6); L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap & CARTO',subdomains:'abcd',maxZoom:19}).addTo(map); }
 function updateMarkers(){
   Object.values(markers).forEach(m=>map.removeLayer(m)); markers={};
   Object.entries(grouped).forEach(([prov,rows])=>{
     const coord=provinceCoords[prov]; if(!coord) return; const counts=countsByCat(rows); const st=statusOf(rows);
-    const icon=L.divIcon({html:makePieSvg(counts, st.duplicate?42:46),className:'',iconSize:[46,46],iconAnchor:[23,23]});
+    const icon=L.divIcon({html:makePieSvg(counts, st.duplicate?46:50),className:'',iconSize:[50,50],iconAnchor:[25,25]});
     const marker=L.marker(coord,{icon}).addTo(map).bindTooltip(`${prov}<br>${st.duplicate?'มีสาขาซ้ำ':'ครบ 3 สาขาไม่ซ้ำ'}`,{direction:'top',className:'province-label'});
     marker.on('click',()=>selectProvince(prov,true)); markers[prov]=marker;
   });
@@ -228,13 +323,10 @@ function populateFilters(){
 function applyFilters(keepProvince){
   const prov=document.getElementById('provincePicker').value, exp=document.getElementById('expertisePicker').value, status=document.getElementById('statusPicker').value;
   const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
-  currentFiltered=rawData.filter(r=>{
-    if(prov && r.province!==prov) return false; if(exp && r.cat!==exp) return false; if(status){ const st=statusOf(byProv[r.province]||[]); if(status==='unique' && st.duplicate) return false; if(status==='duplicate' && !st.duplicate) return false; }
-    return true;
-  });
-  regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis();
-  if(!keepProvince && !prov) { const first=Object.keys(grouped)[0]; if(first) selectProvince(first,false); }
+  currentFiltered=rawData.filter(r=>{ if(prov && r.province!==prov) return false; if(exp && r.cat!==exp) return false; if(status){ const st=statusOf(byProv[r.province]||[]); if(status==='unique' && st.duplicate) return false; if(status==='duplicate' && !st.duplicate) return false; } return true; });
+  regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis(); if(!keepProvince && !prov) { const first=Object.keys(grouped)[0]; if(first) selectProvince(first,false); }
 }
+function esc(s){return normalizeText(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
 function selectProvince(prov,fly){
   activeProvince=prov; document.getElementById('provincePicker').value=prov;
   const rows=(rawData.filter(r=>r.province===prov)); const st=statusOf(rows); const counts=countsByCat(rows);
@@ -242,45 +334,20 @@ function selectProvince(prov,fly){
   document.getElementById('provDiversity').className = st.duplicate ? 'text-base font-extrabold text-orange-600':'text-base font-extrabold text-emerald-700';
   document.getElementById('provStatus').innerHTML = st.duplicate ? '<span class="pill pill-orange">มีสาขาซ้ำ</span>':'<span class="pill pill-green">ครบถ้วน</span>';
   const body=document.getElementById('detailTable');
-  body.innerHTML=rows.sort((a,b)=>String(a.order).localeCompare(String(b.order),'th',{numeric:true})).map((r,i)=>`<tr><td class="text-center font-bold text-blue-800">${r.order || `รายที่ ${i+1}`}</td><td class="font-semibold">${r.name||'-'}</td><td><span class="category-chip" style="background:${catMeta(r.cat).color}">${catMeta(r.cat).short}</span><div class="mt-1 text-xs text-slate-600">${r.expertise||'-'}</div></td><td>${r.position||'-'}</td></tr>`).join('');
+  body.innerHTML=rows.sort((a,b)=>String(a.order).localeCompare(String(b.order),'th',{numeric:true})).map((r,i)=>`<tr><td class="text-center font-bold text-blue-800">${esc(r.order || `รายที่ ${i+1}`)}</td><td class="font-semibold">${esc(r.name||'-')}</td><td><span class="category-chip" style="background:${catMeta(r.cat).color}">${catMeta(r.cat).short}</span><div class="mt-1 text-xs text-slate-600">${esc(r.expertise||'-')}</div></td><td>${esc(r.position||'-')}</td></tr>`).join('') || '<tr><td colspan="4" class="text-center text-slate-400 py-8">ไม่พบข้อมูลรายชื่อของจังหวัดนี้</td></tr>';
   const indicator=document.getElementById('statusIndicator'); indicator.classList.remove('hidden'); indicator.className = st.duplicate ? 'rounded-xl p-3 border border-orange-200 bg-orange-50 text-orange-900':'rounded-xl p-3 border border-emerald-200 bg-emerald-50 text-emerald-900';
-  indicator.innerHTML = st.duplicate ? `⚠️ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิบางรายอยู่ในสาขาความเชี่ยวชาญซ้ำกัน ควรตรวจสอบความสมดุลขององค์ประกอบ` : `✅ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิต่างสาขาครบถ้วน ไม่มีสาขาความเชี่ยวชาญซ้ำกัน`;
+  indicator.innerHTML = st.duplicate ? `⚠️ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิบางรายอยู่ในสาขาความเชี่ยวชาญซ้ำกัน` : `✅ <b>สรุป :</b> จังหวัด${prov} มีผู้ทรงคุณวุฒิต่างสาขาครบถ้วน ไม่มีสาขาความเชี่ยวชาญซ้ำกัน`;
   document.getElementById('provinceSummary').innerHTML=CATS.map(c=>`<div class="flex justify-between gap-2"><span><span class="legend-dot" style="background:${c.color}"></span>${c.short}</span><b>${counts[c.key]||0} ท่าน</b></div>`).join('');
-  updateProvinceChart(counts, prov);
-  if(fly && provinceCoords[prov]) map.flyTo(provinceCoords[prov],8,{duration:.8});
-  if(markers[prov]) markers[prov].openTooltip();
+  updateProvinceChart(counts, prov); if(fly && provinceCoords[prov]) map.flyTo(provinceCoords[prov],8,{duration:.8}); if(markers[prov]) markers[prov].openTooltip();
 }
-function updateProvinceChart(counts, prov){
-  const ctx=document.getElementById('provinceChart'); if(provinceChart) provinceChart.destroy();
-  provinceChart=new Chart(ctx,{type:'pie',data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>counts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:2}]},options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}},title:{display:true,text:`สัดส่วนความเชี่ยวชาญ : ${prov}`,font:{family:'Sarabun',size:13,weight:'bold'}}},animation:{duration:350}}});
-}
-function updateCharts(){
-  const allCounts=countsByCat(currentFiltered.length?currentFiltered:rawData);
-  if(barChart) barChart.destroy();
-  barChart=new Chart(document.getElementById('barChart'),{type:'bar',data:{labels:CATS.map(c=>c.short),datasets:[{label:'จำนวน (ท่าน)',data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderRadius:8}]},options:{scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{font:{family:'Sarabun',size:10}}}},plugins:{legend:{display:false}},animation:{duration:350}}});
-  if(donutChart) donutChart.destroy();
-  donutChart=new Chart(document.getElementById('donutChart'),{type:'doughnut',data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:3}]},options:{cutout:'58%',plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}}},animation:{duration:350}}});
-}
-function updateTables(){
-  const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
-  const entries=Object.entries(byProv).map(([p,rows])=>({p,rows,st:statusOf(rows)}));
-  const dup=entries.filter(e=>e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th'));
-  const uni=entries.filter(e=>!e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th'));
-  document.getElementById('dupTable').innerHTML = dup.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-orange-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td><span class="pill pill-orange">${e.st.uniqueCount} สาขา / ${e.rows.length} ราย</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>';
-  document.getElementById('uniqueTable').innerHTML = uni.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-emerald-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td class="text-center"><span class="pill pill-green">${e.rows.length}</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>';
-}
-function updateKpis(){
-  const provCount=new Set(rawData.map(r=>r.province)).size; const expertCount=rawData.length; const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r));
-  const dupCount=Object.values(byProv).filter(rows=>statusOf(rows).duplicate).length;
-  document.getElementById('kpiProvince').textContent=provCount; document.getElementById('kpiExpert').textContent=expertCount; document.getElementById('kpiDup').textContent=dupCount; document.getElementById('kpiDupPct').textContent = provCount ? `${((dupCount/provCount)*100).toFixed(2)}%` : '-';
-}
+function updateProvinceChart(counts, prov){ const ctx=document.getElementById('provinceChart'); if(provinceChart) provinceChart.destroy(); provinceChart=new Chart(ctx,{type:'pie',data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>counts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:2}]},options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}},title:{display:true,text:`สัดส่วนความเชี่ยวชาญ : ${prov}`,font:{family:'Sarabun',size:13,weight:'bold'}}},animation:{duration:350}}}); }
+function updateCharts(){ const allCounts=countsByCat(currentFiltered.length?currentFiltered:rawData); if(barChart) barChart.destroy(); barChart=new Chart(document.getElementById('barChart'),{type:'bar',data:{labels:CATS.map(c=>c.short),datasets:[{label:'จำนวน (ท่าน)',data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderRadius:8}]},options:{scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{font:{family:'Sarabun',size:10}}}},plugins:{legend:{display:false}},animation:{duration:350}}}); if(donutChart) donutChart.destroy(); donutChart=new Chart(document.getElementById('donutChart'),{type:'doughnut',data:{labels:CATS.map(c=>c.short),datasets:[{data:CATS.map(c=>allCounts[c.key]||0),backgroundColor:colors,borderColor:'#fff',borderWidth:3}]},options:{cutout:'58%',plugins:{legend:{position:'bottom',labels:{font:{family:'Sarabun',size:10},boxWidth:10}}},animation:{duration:350}}}); }
+function updateTables(){ const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r)); const entries=Object.entries(byProv).map(([p,rows])=>({p,rows,st:statusOf(rows)})); const dup=entries.filter(e=>e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th')); const uni=entries.filter(e=>!e.st.duplicate).sort((a,b)=>a.p.localeCompare(b.p,'th')); document.getElementById('dupTable').innerHTML = dup.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-orange-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td><span class="pill pill-orange">${e.st.uniqueCount} สาขา / ${e.rows.length} ราย</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>'; document.getElementById('uniqueTable').innerHTML = uni.map((e,i)=>`<tr onclick="selectProvince('${e.p}',true)" class="cursor-pointer hover:bg-emerald-50"><td class="text-center">${i+1}</td><td class="font-bold">${e.p}</td><td class="text-center"><span class="pill pill-green">${e.rows.length}</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-slate-400 py-6">ไม่พบข้อมูล</td></tr>'; }
+function updateKpis(){ const provCount=new Set(rawData.map(r=>r.province)).size; const expertCount=rawData.length; const byProv={}; rawData.forEach(r=>(byProv[r.province] ||= []).push(r)); const dupCount=Object.values(byProv).filter(rows=>statusOf(rows).duplicate).length; document.getElementById('kpiProvince').textContent=provCount; document.getElementById('kpiExpert').textContent=expertCount; document.getElementById('kpiDup').textContent=dupCount; document.getElementById('kpiDupPct').textContent = provCount ? `${((dupCount/provCount)*100).toFixed(2)}%` : '-'; }
 function drawLegend(){document.getElementById('legend').innerHTML=CATS.map(c=>`<div><span class="legend-dot" style="background:${c.color}"></span><b>${c.short}</b><br><span class="ml-6 text-slate-500">${c.label}</span></div>`).join('');}
 function focusCurrent(){if(activeProvince && provinceCoords[activeProvince]) map.flyTo(provinceCoords[activeProvince],8,{duration:.8});}
 function resetFilter(){document.getElementById('provincePicker').value='';document.getElementById('expertisePicker').value='';document.getElementById('statusPicker').value='';activeProvince='';applyFilters(false);map.flyTo([13.6,101.4],6,{duration:.8});}
-function init(){
-  document.getElementById('dataDate').textContent='ข้อมูล ณ วันที่ '+new Date().toLocaleDateString('th-TH',{year:'numeric',month:'short',day:'numeric'});
-  drawLegend(); initMap(); populateFilters(); currentFiltered=[...rawData]; regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis(); const first=rawData.find(r=>r.province==='เชียงใหม่')?.province || rawData[0]?.province; if(first) selectProvince(first,false);
-}
+function init(){ document.getElementById('dataDate').textContent='ข้อมูล ณ วันที่ '+new Date().toLocaleDateString('th-TH',{year:'numeric',month:'short',day:'numeric'}); drawLegend(); initMap(); populateFilters(); currentFiltered=[...rawData]; regroup(); updateMarkers(); updateCharts(); updateTables(); updateKpis(); const first=rawData.find(r=>r.province==='เชียงใหม่')?.province || rawData[0]?.province; if(first) selectProvince(first,false); }
 loadData();
 </script>
 </body>
